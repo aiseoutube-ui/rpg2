@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Conquista Relámpago — Reino (Phaser + Backend)</title>
+
+  <style>
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background:#121212;color:#e0e0e0;margin:0;overflow:hidden;
+      min-height:100vh;display:flex;align-items:center;justify-content:center;
+    }
+    .game-wrapper{
+      display:flex;flex-direction:row;background:#1e1e1e;border-radius:10px;
+      box-shadow:0 4px 15px rgba(0,0,0,.5);overflow:hidden;
+    }
+    .container{ position:relative; width:1024px; height:576px; background:#000; }
+    .sidebar-ui{
+      width:300px;height:576px;padding:15px;box-sizing:border-box;
+      display:flex;flex-direction:column;gap:15px;overflow-y:auto;
+    }
+    .sidebar-ui h1{ text-align:center;color:#bb86fc;margin:0 0 10px 0;font-size:24px; }
+
+    /* Telas */
+    #login-screen,#loading-screen{
+      position:fixed; inset:0; background:rgba(18,18,18,.95);
+      display:flex;flex-direction:column;align-items:center;justify-content:center; z-index:100;
+      text-align:center;
+    }
+    #loading-screen{ display:none; }
+    #login-screen h1{ color:#bb86fc; }
+    #login-screen input{
+      padding:10px; font-size:16px; background:#333; border:1px solid #555; color:#fff;
+      border-radius:6px; margin-bottom:10px; outline:none;
+    }
+    #login-screen button{
+      background:#bb86fc; color:#121212; border:none; padding:12px 18px; border-radius:6px;
+      font-size:16px; font-weight:700; cursor:pointer; transition:.2s;
+    }
+    #login-screen button:hover{ background:#a060fc; }
+    #login-screen button:disabled{ background:#555; cursor:not-allowed; }
+
+    /* Recursos */
+    .recursos-bar{
+      background:#2a2a2a; border-radius:8px; padding:10px;
+      display:grid; grid-template-columns:1fr 1fr; gap:10px;
+    }
+    .recurso-item{ background:#333; border-radius:6px; padding:6px; text-align:center; }
+    .recurso-item h3{ margin:0 0 5px; color:#bb86fc; font-size:14px; }
+    .recurso-valor{ font-size:18px; font-weight:700; color:#03dac6; }
+    .recurso-tasa{ font-size:11px; color:#9aa; }
+    .recurso-item-full{ grid-column:1 / -1; }
+
+    /* Conquista */
+    .ataque-seccion{ background:#2a2a2a; padding:15px; border-radius:8px; }
+    .ataque-seccion h2{ margin:0 0 10px; color:#bb86fc; font-size:16px; text-align:center; }
+    .ataque-seccion select,.ataque-seccion button{
+      width:100%; padding:8px; font-size:14px; background:#333; border:1px solid #555; color:#fff;
+      border-radius:6px; margin-bottom:6px;
+    }
+    .ataque-seccion button{ background:#bb86fc; color:#121212; font-weight:700; cursor:pointer; }
+    .ataque-seccion button:hover{ background:#a060fc; }
+    .ataque-seccion button:disabled{ background:#555; cursor:not-allowed; }
+
+    /* Log */
+    #game-log{
+      background:#2a2a2a; padding:10px; border-radius:8px; height:100px; overflow-y:auto;
+      font-family:"Courier New", Courier, monospace; font-size:12px; flex-grow:1;
+    }
+    #game-log p{ margin:2px 0; }
+
+    /* Tooltip de mejora */
+    #upgrade-tooltip{
+      position:absolute; display:none; background:rgba(30,30,30,.95); border:1px solid #555; border-radius:8px;
+      padding:10px; min-width:170px; text-align:center; z-index:50;
+      box-shadow:0 8px 30px rgba(0,0,0,.35);
+    }
+    #upgrade-tooltip h4{ margin:0 0 6px; color:#bb86fc; font-size:14px; }
+    #upgrade-tooltip .costo{ display:block; font-size:12px; color:#aaa; margin-bottom:8px; }
+    #upgrade-tooltip button{
+      background:#03dac6; color:#121212; border:none; border-radius:6px; padding:6px 10px; font-size:12px;
+      font-weight:700; cursor:pointer; margin:2px;
+    }
+    #upgrade-tooltip button:hover{ background:#02c9b6; }
+
+    /* Cinemática */
+    #cinematic-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.9); display:none;
+      align-items:center; justify-content:center; z-index:999; }
+    #cinematic-video{ width:80%; max-width:900px; border:2px solid #bb86fc; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+</head>
+<body>
+  <!-- Login -->
+  <div id="login-screen">
+    <h1>Conquista Relámpago</h1>
+    <p>Escribe tu nombre de jugador.</p>
+    <input type="text" id="nombre-jugador" placeholder="TuNombre"/>
+    <button id="login-btn">Entrar al Reino</button>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading-screen"><p>Cargando reino...</p></div>
+
+  <!-- Juego -->
+  <div class="game-wrapper" style="display:none;">
+    <div class="container" id="phaser-container">
+      <!-- Tooltip (DOM sobre canvas) -->
+      <div id="upgrade-tooltip">
+        <h4 id="tooltip-title">Mejorar (Nv 1)</h4>
+        <span class="costo">Costo: <span id="tooltip-cost">100</span></span>
+        <button id="tooltip-upgrade-btn">Mejorar</button>
+        <button id="tooltip-recruit-btn" style="display:none;">Reclutar</button>
+      </div>
+    </div>
+
+    <div class="sidebar-ui">
+      <h1 id="titulo-reino">Reino</h1>
+
+      <div class="recursos-bar">
+        <div class="recurso-item">
+          <h3>Oro</h3>
+          <div id="oro-valor" class="recurso-valor">0</div>
+          <div id="oro-tasa" class="recurso-tasa">(+0/s)</div>
+        </div>
+        <div class="recurso-item">
+          <h3>Maná</h3>
+          <div id="mana-valor" class="recurso-valor">0</div>
+          <div id="mana-tasa" class="recurso-tasa">(+0/s)</div>
+        </div>
+        <div class="recurso-item">
+          <h3>Guerreros</h3>
+          <div id="guerreros-total" class="recurso-valor">0</div>
+        </div>
+        <div class="recurso-item">
+          <h3>Hechiceros</h3>
+          <div id="hechiceros-total" class="recurso-valor">0</div>
+        </div>
+        <div class="recurso-item recurso-item-full">
+          <h3>P. Ataque</h3>
+          <div id="pa-valor" class="recurso-valor">0</div>
+          <div class="recurso-tasa">(Max 5)</div>
+        </div>
+      </div>
+
+      <div class="ataque-seccion">
+        <h2>Conquista</h2>
+        <select id="oponentes-lista"><option value="">-- Elige un oponente --</option></select>
+        <button id="atacar-btn">¡Atacar!</button>
+      </div>
+
+      <div id="game-log"><p>Bienvenido, <span id="log-player-name">Jugador</span>!</p></div>
+    </div>
+  </div>
+
+  <!-- Cinemática -->
+  <div id="cinematic-overlay">
+    <video id="cinematic-video" controls></video>
+  </div>
+
+  <script>
+    /* =======================
+       CONFIGURACIÓN & ESTADO
+    ======================== */
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxhQih44XM5uxEn9KcSM_Wx7WwFrO17BMSD4TRGruCMFjqE42NcgA-WFcClfV4BGd8j/exec";
+
+    let gameState = {
+      jugador:"", oro:0, mana:0,
+      nivelMineros:1, nivelAcolitos:1,
+      guerreros:0, hechiceros:0, puntosAtaque:0,
+      listaOponentes:[]
+    };
+
+    const JUEGO_DEFS = {
+      minero   : { nombre:"Mina",              costoBase:100, costoFactor:1.15, tasa:0.5, recursoCosto:'oro'  },
+      acolito  : { nombre:"Pozo de Maná",      costoBase: 50, costoFactor:1.18, tasa:0.2, recursoCosto:'mana' },
+      guerrero : { nombre:"Caballería",        costoBase:150, esTropa:true, recursoCosto:'oro'  },
+      hechicero: { nombre:"Torre de Hechicero",costoBase:100, esTropa:true, recursoCosto:'mana' }
+    };
+
+    /* =======================
+       DOM refs
+    ======================== */
+    const loginScreen = document.getElementById("login-screen");
+    const loadingScreen = document.getElementById("loading-screen");
+    const gameWrapper  = document.querySelector(".game-wrapper");
+    const containerDiv = document.getElementById("phaser-container");
+
+    const loginBtn  = document.getElementById("login-btn");
+    const nombreInp = document.getElementById("nombre-jugador");
+
+    const tituloReino     = document.getElementById("titulo-reino");
+    const oroValor        = document.getElementById("oro-valor");
+    const manaValor       = document.getElementById("mana-valor");
+    const paValor         = document.getElementById("pa-valor");
+    const oroTasa         = document.getElementById("oro-tasa");
+    const manaTasa        = document.getElementById("mana-tasa");
+    const guerrerosTotal  = document.getElementById("guerreros-total");
+    const hechicerosTotal = document.getElementById("hechiceros-total");
+
+    const oponentesLista = document.getElementById("oponentes-lista");
+    const atacarBtn      = document.getElementById("atacar-btn");
+    const gameLog        = document.getElementById("game-log");
+    const logPlayerName  = document.getElementById("log-player-name");
+
+    const cinematicOverlay = document.getElementById("cinematic-overlay");
+    const cinematicVideo   = document.getElementById("cinematic-video");
+
+    const upgradeTooltip    = document.getElementById("upgrade-tooltip");
+    const tooltipTitle      = document.getElementById("tooltip-title");
+    const tooltipCost       = document.getElementById("tooltip-cost");
+    const tooltipUpgradeBtn = document.getElementById("tooltip-upgrade-btn");
+    const tooltipRecruitBtn = document.getElementById("tooltip-recruit-btn");
+
+    let currentTooltipBuilding = null;
+    let spritesByType = {}; // { minero, acolito, guerrero, hechicero }
+    let currentScene = null; // referencia a la escena Phaser
+
+    /* =======================
+       BUCLES
+    ======================== */
+    let gameLoopInterval = null;
+    let saveLoopInterval = null;
+
+    function startGameLoop(){
+      if (gameLoopInterval) clearInterval(gameLoopInterval);
+      gameLoopInterval = setInterval(()=>{
+        gameState.oro  += gameState.nivelMineros  * JUEGO_DEFS.minero.tasa;
+        gameState.mana += gameState.nivelAcolitos * JUEGO_DEFS.acolito.tasa;
+        updateUIResources();
+      }, 1000);
+
+      if (saveLoopInterval) clearInterval(saveLoopInterval);
+      saveLoopInterval = setInterval(saveGame, 180000);
+    }
+
+    /* =======================
+       LOGIN/CARGA
+    ======================== */
+    loginBtn.addEventListener("click", ()=>{
+      const nombre = (nombreInp.value||"").trim().replace(/[^a-zA-Z0-9]/g,'');
+      if(!nombre){ alert("Por favor, escribe un nombre válido (solo letras y números)."); return; }
+      loginBtn.disabled = true;
+      loginScreen.style.display = 'none';
+      loadingScreen.style.display = 'flex';
+      loadGame(nombre);
+    });
+
+    async function loadGame(nombre){
+      try{
+        const resp = await fetch(`${GAS_URL}?jugador=${nombre}`);
+        if(!resp.ok) throw new Error(`Error de red: ${resp.statusText}`);
+        const data = await resp.json();
+        if(data.error) throw new Error(data.error);
+
+        gameState = { ...gameState, ...data, jugador:nombre };
+        logPlayerName.textContent = nombre;
+        tituloReino.textContent   = `Reino de ${nombre}`;
+
+        loadingScreen.style.display = 'none';
+        gameWrapper.style.display   = 'flex';
+
+        if(data.gananciasOffline && data.gananciasOffline.segundos > 5){
+          logMessage(`Ganancias offline (${data.gananciasOffline.segundos}s): +${data.gananciasOffline.oro.toFixed(0)} Oro, +${data.gananciasOffline.mana.toFixed(0)} Maná.`);
+        }
+
+        populateOponentes();
+        updateUIResources();
+        startGameLoop();
+        initPhaser();
+      }catch(e){
+        alert("Error al cargar: "+e.message);
+        loadingScreen.style.display='none';
+        loginScreen.style.display  ='flex';
+        loginBtn.disabled = false;
+      }
+    }
+
+    /* =======================
+       GUARDAR (devuelve true/false)
+    ======================== */
+    async function saveGame(){
+      if(!gameState.jugador) return false;
+      try{
+        const resp = await fetch(GAS_URL,{
+          method:'POST', mode:'cors', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({
+            accion:"guardar_progreso", jugador:gameState.jugador,
+            estado:{
+              oro:gameState.oro, mana:gameState.mana,
+              nivelMineros:gameState.nivelMineros, nivelAcolitos:gameState.nivelAcolitos,
+              guerreros:gameState.guerreros, hechiceros:gameState.hechiceros,
+              puntosAtaque:gameState.puntosAtaque
+            }
+          })
+        });
+        const data = await resp.json();
+        if(data.exito){ logMessage("Progreso guardado."); return true; }
+        else { logMessage("Error al guardar: " + (data.error || 'Desconocido')); return false; }
+      }catch(e){
+        logMessage("Error de red al guardar: " + e.message);
+        return false;
+      }
+    }
+
+    /* =======================
+       ATAQUE
+    ======================== */
+    atacarBtn.addEventListener("click", async ()=>{
+      const objetivo = oponentesLista.value;
+      if(!objetivo) return alert("¡Debes seleccionar un oponente!");
+      if(gameState.puntosAtaque < 1) return alert("¡No tienes Puntos de Ataque!");
+
+      atacarBtn.disabled = true; atacarBtn.textContent = "Atacando...";
+      logMessage(`Atacando a ${objetivo}...`);
+
+      try{
+        const resp = await fetch(GAS_URL,{
+          method:'POST', mode:'cors', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({ accion:"atacar_jugador", jugador:gameState.jugador, objetivo })
+        });
+        const data = await resp.json();
+
+        if(data.error){
+          alert(data.error);
+          if(typeof data.pa !== "undefined") gameState.puntosAtaque = data.pa;
+        }else{
+          logMessage(data.mensaje);
+          gameState.puntosAtaque = data.pa_restantes;
+          if(data.resultado === 'victoria'){
+            gameState.oro  += data.oroRobado;
+            gameState.mana += data.manaRobado;
+          }
+          playCinematic(data.video || (data.resultado === 'victoria' ? 'ataque_victoria.mp4' : 'ataque_derrota.mp4'));
+        }
+        updateUIResources();
+      }catch(e){
+        logMessage("Error de red en el ataque: " + e.message);
+      }finally{
+        atacarBtn.disabled = false; atacarBtn.textContent = "¡Atacar!";
+      }
+    });
+
+    /* =======================
+       COMPRAS / TOOLTIP
+    ======================== */
+    tooltipUpgradeBtn.addEventListener('click', async ()=>{
+      if(!currentTooltipBuilding) return;
+      const ok = buyItem(currentTooltipBuilding);
+      if(!ok) return;
+      const saved = await saveGame();
+      if(saved && currentScene && spritesByType[currentTooltipBuilding]){
+        goldenGlow(currentScene, spritesByType[currentTooltipBuilding]);
+      }
+      // refresca tooltip con nuevos costes/valores
+      if(spritesByType[currentTooltipBuilding]){
+        showUpgradeTooltipAtSprite(spritesByType[currentTooltipBuilding], currentTooltipBuilding);
+      }
+    });
+
+    tooltipRecruitBtn.addEventListener('click', async ()=>{
+      if(!currentTooltipBuilding) return;
+      const ok = buyItem(currentTooltipBuilding);
+      if(!ok) return;
+      const saved = await saveGame();
+      if(saved && currentScene && spritesByType[currentTooltipBuilding]){
+        goldenGlow(currentScene, spritesByType[currentTooltipBuilding]);
+      }
+      if(spritesByType[currentTooltipBuilding]){
+        showUpgradeTooltipAtSprite(spritesByType[currentTooltipBuilding], currentTooltipBuilding);
+      }
+    });
+
+    function buyItem(item){
+      const def = JUEGO_DEFS[item];
+      const cost = def.esTropa ? def.costoBase : calcularCosto(item);
+      const tiene = (def.recursoCosto==='oro') ? gameState.oro : gameState.mana;
+
+      if(tiene < cost){
+        logMessage(`No hay suficiente ${def.recursoCosto==='oro' ? 'Oro' : 'Maná'}.`);
+        return false;
+      }
+
+      if(def.recursoCosto==='oro') gameState.oro -= cost; else gameState.mana -= cost;
+
+      if(item==='minero'){ gameState.nivelMineros++; logMessage(`¡Mina mejorada a Nv ${gameState.nivelMineros}!`); }
+      else if(item==='acolito'){ gameState.nivelAcolitos++; logMessage(`¡Pozo mejorado a Nv ${gameState.nivelAcolitos}!`); }
+      else if(item==='guerrero'){ gameState.guerreros++; logMessage("¡Caballero reclutado!"); }
+      else if(item==='hechicero'){ gameState.hechiceros++; logMessage("¡Hechicero invocado!"); }
+
+      updateUIResources();
+      return true;
+    }
+
+    function calcularCosto(item){
+      const def = JUEGO_DEFS[item];
+      const level = (item==='minero') ? gameState.nivelMineros : gameState.nivelAcolitos;
+      return Math.floor(def.costoBase * Math.pow(def.costoFactor, level - 1));
+    }
+
+    function updateUIResources(){
+      oroValor.textContent  = Math.floor(gameState.oro).toLocaleString();
+      manaValor.textContent = Math.floor(gameState.mana).toLocaleString();
+      paValor.textContent   = gameState.puntosAtaque;
+      oroTasa.textContent   = `(${(gameState.nivelMineros * JUEGO_DEFS.minero.tasa).toFixed(1)}/s)`;
+      manaTasa.textContent  = `(${(gameState.nivelAcolitos * JUEGO_DEFS.acolito.tasa).toFixed(1)}/s)`;
+      guerrerosTotal.textContent  = gameState.guerreros.toLocaleString();
+      hechicerosTotal.textContent = gameState.hechiceros.toLocaleString();
+    }
+
+    function populateOponentes(){
+      oponentesLista.innerHTML = '<option value="">-- Elige un oponente --</option>';
+      gameState.listaOponentes.forEach(n=>{
+        const opt = document.createElement("option");
+        opt.value = n; opt.textContent = n;
+        oponentesLista.appendChild(opt);
+      });
+    }
+
+    function logMessage(msg){
+      const p = document.createElement("p");
+      p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      if(gameLog.children.length > 40) gameLog.removeChild(gameLog.firstChild);
+      gameLog.appendChild(p);
+      gameLog.scrollTop = gameLog.scrollHeight;
+    }
+
+    /* =======================
+       CINEMÁTICA
+    ======================== */
+    function playCinematic(src){
+      if(!src){ console.warn("Sin video para cinemática."); return; }
+      cinematicVideo.src = src;
+      cinematicOverlay.style.display = "flex";
+      cinematicVideo.play().catch(e=>console.error("Error al reproducir video:", e));
+    }
+    cinematicVideo.onended = hideCinematic;
+    cinematicOverlay.onclick = (e)=>{ if(e.target===cinematicOverlay) hideCinematic(); };
+    function hideCinematic(){ cinematicOverlay.style.display="none"; cinematicVideo.pause(); cinematicVideo.src=""; }
+
+    /* =======================
+       PHASER (Mapa + Integración)
+    ======================== */
+    function initPhaser(){
+      const config = {
+        type: Phaser.AUTO,
+        width: 1024, height: 576,
+        parent: 'phaser-container',
+        scene: { preload, create }
+      };
+      new Phaser.Game(config);
+
+      function preload(){
+        currentScene = this;
+        this.load.image('fondo',     'assets/fondo_reino.jpg');
+        this.load.image('mina',      'assets/edificios/mina.png');
+        this.load.image('pozo',      'assets/edificios/pozo_mana.png');
+        this.load.image('cuartel',   'assets/edificios/cuartel.png');
+        this.load.image('hechiceros','assets/edificios/hechiceros.png');
+        this.load.image('castillo',  'assets/edificios/castillo.png');
+      }
+
+      function create(){
+        currentScene = this;
+
+        // Fondo
+        this.add.image(0,0,'fondo').setOrigin(0,0).setDisplaySize(1024,576);
+
+        // Helper colocar edificios con flotación
+        const colocar = (key, x, y, escala=0.08, interactivo=true)=>{
+          const s = this.add.sprite(x,y,key).setScale(escala);
+          if(interactivo) s.setInteractive({ useHandCursor:true });
+          this.tweens.add({ targets:s, y:y-0.29, duration:1000, yoyo:true, repeat:-1, ease:'Sine.easeInOut' });
+          return s;
+        };
+
+        // POSICIONES exactas que pediste:
+        const sprMinero = colocar('mina',     200, 370, 0.07,  true);
+        const sprCastil = colocar('castillo', 730, 166, 0.22,  true); // ahora interactivo
+        const sprAcolit = colocar('pozo',     297, 461, 0.06,  true);
+        const sprGuerr  = colocar('cuartel',  781, 404, 0.08,  true);
+        const sprHechi  = colocar('hechiceros',329, 221, 0.075, true);
+
+        // Humo sutil sobre la mina (opcional: comentar si no lo quieres)
+        // (usamos tween simple de scale/alpha con un círculo dorado también en mejoras)
+        // Coordenadas logging: click libre en el mapa
+        this.input.on('pointerdown', (pointer, objectsUnderPointer)=>{
+          // Si no se clicó un sprite interactivo, logear coordenadas
+          if(!objectsUnderPointer || objectsUnderPointer.length===0){
+            console.log(`Coordenadas: x=${Math.round(pointer.x)}, y=${Math.round(pointer.y)}`);
+          }
+        });
+
+        // Mapear tipos → sprites para tooltip/acciones
+        spritesByType = {
+          minero: sprMinero,
+          acolito: sprAcolit,
+          guerrero: sprGuerr,
+          hechicero: sprHechi
+        };
+
+        // Clicks: edificios del sistema
+        Object.entries(spritesByType).forEach(([tipo, sp])=>{
+          sp.on('pointerdown', ()=> showUpgradeTooltipAtSprite(sp, tipo));
+        });
+
+        // Castillo clicable: muestra tooltip informativo (sin costos)
+        sprCastil.on('pointerdown', ()=>{
+          showCastleTooltipAtSprite(sprCastil);
+        });
+      }
+    }
+
+    // Tooltip sobre sprite (minero/acolito/guerrero/hechicero)
+    function showUpgradeTooltipAtSprite(sprite, buildingType){
+      currentTooltipBuilding = buildingType;
+      const def = JUEGO_DEFS[buildingType];
+      let levelOrCount, cost, costResource;
+
+      tooltipRecruitBtn.style.display = 'none';
+      tooltipUpgradeBtn.style.display = 'block';
+
+      if(def.esTropa){
+        levelOrCount = (buildingType==='guerrero') ? gameState.guerreros : gameState.hechiceros;
+        cost = def.costoBase;
+        tooltipUpgradeBtn.style.display = 'none';
+        tooltipRecruitBtn.style.display = 'block';
+        tooltipTitle.textContent = `Reclutar ${def.nombre} (${levelOrCount})`;
+      }else{
+        levelOrCount = (buildingType==='minero') ? gameState.nivelMineros : gameState.nivelAcolitos;
+        cost = calcularCosto(buildingType);
+        tooltipTitle.textContent = `Mejorar ${def.nombre} (Nv ${levelOrCount})`;
+      }
+
+      costResource = (def.recursoCosto==='oro') ? 'Oro' : 'Maná';
+      tooltipCost.textContent = `${cost.toLocaleString()} ${costResource}`;
+
+      positionTooltipOverSprite(sprite);
+    }
+
+    // Tooltip especial para castillo (informativo)
+    function showCastleTooltipAtSprite(sprite){
+      currentTooltipBuilding = null;
+      tooltipTitle.textContent = "Centro del Reino (Castillo)";
+      tooltipCost.textContent  = "Pronto disponible…";
+      tooltipUpgradeBtn.style.display = 'none';
+      tooltipRecruitBtn.style.display = 'none';
+      positionTooltipOverSprite(sprite);
+    }
+
+    // Calcula posición del tooltip alineado al sprite en pantalla
+    function positionTooltipOverSprite(sprite){
+      const containerRect = containerDiv.getBoundingClientRect();
+      const canvas = containerDiv.querySelector('canvas');
+      if(!canvas) return;
+      const canvasRect = canvas.getBoundingClientRect();
+
+      // Convertimos coords del sprite (ya están en px dentro del canvas)
+      const px = canvasRect.left - containerRect.left + sprite.x;
+      const py = canvasRect.top  - containerRect.top  + sprite.y;
+
+      upgradeTooltip.style.display = 'block';
+      const ttRect = upgradeTooltip.getBoundingClientRect();
+
+      let left = px + 20;
+      let top  = py - ttRect.height/2;
+
+      // Boundaries para no salir del contenedor
+      if(left + ttRect.width > containerRect.width)  left = px - ttRect.width - 20;
+      if(top < 10) top = 10;
+      if(top + ttRect.height > containerRect.height) top = containerRect.height - ttRect.height - 10;
+
+      upgradeTooltip.style.left = `${left}px`;
+      upgradeTooltip.style.top  = `${top}px`;
+    }
+
+// ✅ Fix: Evita que el tooltip se cierre al soltar el clic sobre el canvas de Phaser
+containerDiv.addEventListener('mousedown', (ev)=>{
+  // Si el clic fue sobre el canvas (Phaser maneja esto), no cerrar
+  if (ev.target.tagName === 'CANVAS') return;
+  const inside = ev.target.closest('#upgrade-tooltip');
+  if(!inside && upgradeTooltip.style.display === 'block'){
+    hideUpgradeTooltip();
+  }
+});
+
+
+    function hideUpgradeTooltip(){
+      upgradeTooltip.style.display = 'none';
+      currentTooltipBuilding = null;
+    }
+
+    /* =======================
+       EFECTO: Resplandor dorado (2.5s)
+    ======================== */
+    function goldenGlow(scene, sprite){
+      if(!scene) return;
+      // Círculo dorado con additive blend que crece y se desvanece
+      const g = scene.add.graphics({ x: sprite.x, y: sprite.y });
+      g.fillStyle(0xFFD54F, 0.55); // dorado suave
+      g.fillCircle(0, 0, 6);
+      g.setDepth(9999);
+      g.setBlendMode(Phaser.BlendModes.ADD);
+
+      scene.tweens.add({
+        targets: g,
+        scaleX: { from: 1, to: 4.2 },
+        scaleY: { from: 1, to: 4.2 },
+        alpha:  { from: 0.8, to: 0 },
+        duration: 2500,
+        ease: 'Sine.easeOut',
+        onComplete: ()=> g.destroy()
+      });
+
+      // Halo adicional suave
+      const g2 = scene.add.graphics({ x: sprite.x, y: sprite.y });
+      g2.lineStyle(3, 0xFFEE58, 0.6);
+      g2.strokeCircle(0, 0, 14);
+      g2.setDepth(9999);
+      g2.setBlendMode(Phaser.BlendModes.ADD);
+
+      scene.tweens.add({
+        targets: g2,
+        scaleX: { from: 1, to: 2.6 },
+        scaleY: { from: 1, to: 2.6 },
+        alpha:  { from: 0.7, to: 0 },
+        duration: 2200,
+        ease: 'Sine.easeOut',
+        onComplete: ()=> g2.destroy()
+      });
+    }
+
+window.addEventListener('load', () => {
+  const t = document.getElementById('upgrade-tooltip');
+  if (t) {
+    t.style.transform = 'translateZ(0)'; // fuerza capa GPU
+    t.style.willChange = 'transform';
+  }
+});
+  </script>
+</body>
+</html>
